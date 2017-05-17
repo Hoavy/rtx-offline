@@ -1,0 +1,112 @@
+#! /bin/bash
+#
+# 1 * * * * /sbin/rtx > /dev/null 2>&1
+#
+RTXCHECKPID="/tmp/rtxcheck.pid"
+LOG="/tmp/rtxcheck.log"
+TIMELIMIT=60
+
+
+function wifi_check()
+{
+    local rev=$(networksetup -getinfo wi-fi | grep "^IP address:" | awk '{print length($0)}')
+    if [[ -z $rev ]]; then
+        echo false
+    else
+        echo true
+    fi
+}
+
+function rtx_out()
+{
+    local rev=$(ps -ef | grep RTX | grep -v grep | awk '{print $2}')
+    if [[ -z $rev ]]; then
+        echo true
+    else
+        echo false
+    fi
+}
+
+RTXNOTIFITIME=`date +%Y%m%d%H%M%S`
+function rtx_check()
+{
+    local rev=$(netstat -n | grep ".8000" |awk '{print length($0)}')
+    if [[ -z $rev ]]; then
+        echo false
+    else
+        echo true
+    fi
+}
+
+if [ -z $1 ];then
+    rev=$(rtx_out)
+    if [[ $rev == true ]];then
+        exit 1
+    fi
+
+
+    rev=$(wifi_check)
+    if [[ $rev == false ]];then
+        exit 1
+    fi
+
+
+    rev=$(rtx_check)
+    if [[ $rev == false ]];then
+        osascript -e 'display notification "RTX offline" with title "RTX"'
+    fi
+    exit 1
+fi
+
+
+
+case "$1" in
+    stop)
+        PID=$(ps ax | awk '{ print $1 }' | grep -e "^`cat $RTXCHECKPID`$")
+        if [[ "$PID" ]]; then
+            kill -TERM `cat $RTXCHECKPID`
+            rm -rf $RTXCHECKPID
+        else
+            echo "rxt check down [failed]"
+            exit 1
+        fi
+        echo "rxt check down [done]"
+        exit 1
+    ;;
+
+    daemon)
+        if [[ -f "$RTXCHECKPID" ]]; then
+            PID=$(ps ax | awk '{ print $1 }' | grep -e "^`cat $RTXCHECKPID`$")
+            if [[ "$PID" ]]; then
+                echo "rtx check start error , rtx check exists [failed]"
+                exit 1
+            fi
+        fi
+
+        for (( ; ; ))
+        do
+            CURTIME=`date +%Y%m%d%H%M%S`
+            rev=$(rtx_check)
+
+            if [[ $rev == false ]];then
+                if [[ $[$CURTIME - $RTXNOTIFITIME] -lt $TIMELIMIT ]]; then
+                    sleep 10
+                    continue
+                fi
+
+                RTXNOTIFITIME=`date +%Y%m%d%H%M%S`
+                osascript -e 'display notification "RTX offline" with title "RTX"'
+            fi
+
+        done &
+        echo $! > $RTXCHECKPID
+        exit 1
+    ;;
+
+    *)
+        echo "Usage: $0 {stop|daemon}"
+        exit 1
+    ;;
+esac
+
+exit $?
